@@ -19,7 +19,9 @@ package main
 import (
 	"errors"
 	"flag"
+	"fmt"
 	"hash/fnv"
+	"io"
 	"io/ioutil"
 	"log"
 	"os"
@@ -27,6 +29,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -111,6 +114,7 @@ func (e *events) UnmarshalYAML(unmarshal func(interface{}) error) error {
 
 func main() {
 	flag.Parse()
+	log.SetFlags(log.Ldate | log.Lmicroseconds)
 
 	dir, err := filepath.Abs(filepath.Dir(os.Args[0]))
 
@@ -122,6 +126,17 @@ func main() {
 
 	if rules, err = load(dir, *configFile); err != nil {
 		log.Fatalf("unable to load configuration file: %s (%s)", *configFile, err)
+	}
+
+	// Operating system threads that can execute user-level Go code simultaneously
+	if config.Workers > 1 {
+		n := runtime.NumCPU()
+
+		if config.Workers < n {
+			n = config.Workers
+		}
+
+		runtime.GOMAXPROCS(n)
 	}
 
 	log.Printf("loaded %d rules", len(rules))
@@ -275,37 +290,40 @@ func findMatch(f string) *match {
 		return c
 	}
 
+	var (
+		s [][]string
+		m *match
+	)
+
 	// Test each rule for a match
 	for _, r := range rules {
-		m := r.match.FindAllStringSubmatch(f, -1)
-
-		if m == nil {
+		if s = r.match.FindAllStringSubmatch(f, -1); s == nil {
 			continue
 		}
 
-		v := &match{rule: r}
+		m = &match{rule: r}
 
 		for _, cmd := range r.cmds {
-			for i := range m[0] {
+			for i := range s[0] {
 				if i == 0 {
 					continue
 				}
 
-				cmd = strings.Replace(cmd, "$"+strconv.Itoa(i), m[0][i], -1)
+				cmd = strings.Replace(cmd, "$"+strconv.Itoa(i), s[0][i], -1)
 			}
 
-			v.cmds = append(v.cmds, strings.Fields(strings.Replace(cmd, "$file", f, -1)))
+			m.cmds = append(m.cmds, strings.Fields(strings.Replace(cmd, "$file", f, -1)))
 		}
 
-		// Cache for fast lookup
-		matchesMu.Lock()
-		matches[h] = v
-		matchesMu.Unlock()
-
-		return v
+		break
 	}
 
-	return nil
+	// Cache for fast lookup
+	matchesMu.Lock()
+	matches[h] = m
+	matchesMu.Unlock()
+
+	return m
 }
 
 // loads the Gawp config file and handles the loading of rules
@@ -318,48 +336,43 @@ func load(dir string, f string) ([]*rule, error) {
 
 	defer h.Close()
 
-	b, err := ioutil.ReadAll(h)
+	if config, err = loadConfig(h); err != nil {
+		return nil, err
+	}
+
+	if err = setLogFile(dir); err != nil {
+		return nil, err
+	}
+
+	return loadRules()
+}
+
+func loadConfig(in io.Reader) (*configuration, error) {
+	b, err := ioutil.ReadAll(in)
 
 	if err != nil {
 		return nil, err
 	}
 
-	// Overwrite config
-	config = nil
+	var c *configuration
 
-	if err = yaml.Unmarshal(b, &config); err != nil {
+	if err = yaml.Unmarshal(b, &c); err != nil {
 		return nil, err
 	}
 
-	// Set log output
-	if config.Logfile != "" {
-		if config.Logfile[0] != '/' {
-			config.Logfile = dir + "/" + config.Logfile
-		}
+	return c, nil
+}
 
-		// No side effects
-		logFile.Close()
-
-		if logFile, err = os.OpenFile(config.Logfile, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0666); err != nil {
-			log.Fatal(err)
-		}
-
-		log.SetOutput(logFile)
-	}
-
+func loadRules() (rules []*rule, err error) {
 	if len(config.Rules) == 0 {
 		return nil, errNoRules
 	}
-
-	var rules []*rule
 
 	for k, v := range config.Rules {
 		r := &rule{cmds: v, mu: &sync.Mutex{}}
 
 		if r.match, err = regexp.Compile(k); err != nil {
-			log.Println("rule error:", k)
-
-			continue
+			return nil, fmt.Errorf("rule compilation error: %s (%s)", k, err)
 		}
 
 		rules = append(rules, r)
@@ -369,6 +382,29 @@ func load(dir string, f string) ([]*rule, error) {
 	matches = map[int64]*match{}
 
 	return rules, nil
+}
+
+func setLogFile(dir string) (err error) {
+	if config.Logfile == "" {
+		return nil
+	}
+
+	// Relative path
+	if config.Logfile[0] != '/' {
+		config.Logfile = dir + "/" + config.Logfile
+	}
+
+	// Close current log file as location might have changed in the config
+	// No side effects
+	logFile.Close()
+
+	if logFile, err = os.OpenFile(config.Logfile, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0666); err != nil {
+		return err
+	}
+
+	log.SetOutput(logFile)
+
+	return nil
 }
 
 // hash64 returns the hash of the given string as int64
