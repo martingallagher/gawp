@@ -127,8 +127,6 @@ func main() {
 		log.Fatalf("Unable to load '%s' configuration file: %s", *configFile, err)
 	}
 
-	log.Printf("%#v", config.Events)
-
 	log.Printf("Loaded %d rules", len(rules))
 
 	// File system notifications
