@@ -3,7 +3,7 @@ A simple, configurable, file watching, job execution tool implemented in Go.
 
 **gawp**<br>ɡɔːp/<br>*verb, British, informal*<br>stare openly in a stupid or rude manner.
 
-## Instillation
+## Installation
     go get gopkg.in/fsnotify.v1
     go get gopkg.in/yaml.v2
     go get github.com/martingallagher/gawp
@@ -17,19 +17,21 @@ The configuration file location can be set using the `-config my.conf` command-l
 
 **Example .gawp file:**
 
-	recursive: true                 # Watch directories recursively
-	workers: 4                      # Number of concurrent workers (high numbers can thrash IO)
-	#logfile: gawp.log              # Gawp logfile, default: stdout
-	events: [write, create, rename] # Actionable events (create, write, rename, remove, chmod)
+```yaml
+recursive: true                 # Watch directories recursively
+workers: 4                      # Number of concurrent workers (high numbers can thrash IO)
+#logfile: gawp.log              # Gawp logfile, default: stdout
+events: [write, create, rename] # Actionable events (create, write, rename, remove, chmod)
 
-    # Rules are regular expression strings (https://code.google.com/p/re2/wiki/Syntax)
-	rules:
-	  (?i)([a-z]+)\.src\.js$:
-	  - java -jar ~/compiler.jar -O=ADVANCED --language_in=ECMASCRIPT5_STRICT --formatting=SINGLE_QUOTES --define='DEBUG=false' --js_output_file=scripts/$1.js $file
+   # Rules are regular expression strings (https://code.google.com/p/re2/wiki/Syntax)
+rules:
+  (?i)([a-z]+)\.src\.js$:
+  - java -jar ~/compiler.jar -O=ADVANCED --language_in=ECMASCRIPT5_STRICT --formatting=SINGLE_QUOTES --define='DEBUG=false' --js_output_file=scripts/$1.js $file
 
-	  (?i)[a-z]+\.scss:
-	  - compass compile --boring --time -s compressed --css-dir styles/ $file
-	  - echo HELLO DENNIS! # Rules can have multiple commands; output is written as-is to the Gawp log
+  (?i)[a-z]+\.scss:
+  - compass compile --boring --time -s compressed --css-dir styles/ $file
+  - echo HELLO DENNIS! # Rules can have multiple commands; output is written as-is to the Gawp log
+```
 
 # Usage
 Assuming correctly configured `web/assets/.gawp` file: `cd web/assets/ && gawp`
