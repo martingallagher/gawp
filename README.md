@@ -1,4 +1,4 @@
-# Gawp
+# ![Gawp](http://praegress.us/gawp.png)
 A simple, configurable, file watching, job execution tool implemented in Go.
 
 **gawp**<br>ɡɔːp/<br>*verb, British, informal*<br>stare openly in a stupid or rude manner.
