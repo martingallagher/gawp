@@ -1,12 +1,14 @@
 # Gawp
 A simple, configurable, file watching, job execution tool implemented in Go.
 
-**gawp**<br>ɡɔːp/<br>verb, British, informal<br>stare openly in a stupid or rude manner.
+**gawp**<br>ɡɔːp/<br>*verb, British, informal*<br>stare openly in a stupid or rude manner.
 
 ## Instillation
     go get gopkg.in/fsnotify.v1
     go get gopkg.in/yaml.v2
     go get github.com/martingallagher/gawp
+
+The following examples assume your Go $GOPATH/bin is on your $PATH environmental variable (`export PATH=$PATH:$GOPATH/bin`).
 
 ## Configuration
 By default Gawp attempts to read `.gawp` in the active directory. The file format is YAML (http://www.yaml.org/).
