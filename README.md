@@ -29,6 +29,7 @@ The configuration file location can be set using the `-config my.conf` command-l
 
 	  (?i)[a-z]+\.scss:
 	  - compass compile --boring --time -s compressed --css-dir styles/ $file
+	  - echo HELLO DENNIS! # Rules can have multiple commands; output is written as-is to the Gawp log
 
 # Usage
 Assuming correctly configured `web/assets/.gawp` file: `cd web/assets/ && gawp`
