@@ -81,12 +81,9 @@ func (e events) contains(op fsnotify.Op) bool {
 // UnmarshalYAML unmarshals the string array
 // into a event "set" for fast loopup
 func (e *events) UnmarshalYAML(unmarshal func(interface{}) error) error {
-	var (
-		events []string
-		err    = unmarshal(&events)
-	)
+	var events []string
 
-	if err != nil {
+	if err := unmarshal(&events); err != nil {
 		return err
 	} else if len(events) == 0 {
 		return nil
@@ -124,10 +121,10 @@ func main() {
 	defer logFile.Close()
 
 	if rules, err = load(dir, *configFile); err != nil {
-		log.Fatalf("Unable to load '%s' configuration file: %s", *configFile, err)
+		log.Fatalf("unable to load configuration file: %s (%s)", *configFile, err)
 	}
 
-	log.Printf("Loaded %d rules", len(rules))
+	log.Printf("loaded %d rules", len(rules))
 
 	// File system notifications
 	watcher, err := fsnotify.NewWatcher()
@@ -257,7 +254,7 @@ func worker(throttle chan struct{}, wg *sync.WaitGroup, f string) {
 		}
 
 		if b, err := cmd.Output(); err != nil {
-			log.Printf("Command (%s) error: %s", c, err)
+			log.Printf("command (%s) error: %s", c, err)
 		} else if len(b) > 0 {
 			log.Printf("%s\n%s", m.rule.cmds[i], b)
 		}
@@ -278,7 +275,7 @@ func findMatch(f string) *match {
 		return c
 	}
 
-	// Test each rules for a match
+	// Test each rule for a match
 	for _, r := range rules {
 		m := r.match.FindAllStringSubmatch(f, -1)
 
@@ -327,6 +324,9 @@ func load(dir string, f string) ([]*rule, error) {
 		return nil, err
 	}
 
+	// Overwrite config
+	config = nil
+
 	if err = yaml.Unmarshal(b, &config); err != nil {
 		return nil, err
 	}
@@ -357,7 +357,7 @@ func load(dir string, f string) ([]*rule, error) {
 		r := &rule{cmds: v, mu: &sync.Mutex{}}
 
 		if r.match, err = regexp.Compile(k); err != nil {
-			log.Println("Rule error:", k)
+			log.Println("rule error:", k)
 
 			continue
 		}
