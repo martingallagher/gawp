@@ -23,7 +23,7 @@ workers: 4                      # Number of concurrent workers (high numbers can
 #logfile: gawp.log              # Gawp logfile, default: stdout
 events: [write, create, rename] # Actionable events (create, write, rename, remove, chmod)
 
-   # Rules are regular expression strings (https://code.google.com/p/re2/wiki/Syntax)
+# Rules are regular expression strings (https://code.google.com/p/re2/wiki/Syntax)
 rules:
   (?i)([a-z]+)\.src\.js$:
   - java -jar ~/compiler.jar -O=ADVANCED --language_in=ECMASCRIPT5_STRICT --formatting=SINGLE_QUOTES --define='DEBUG=false' --js_output_file=scripts/$1.js $file
