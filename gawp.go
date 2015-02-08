@@ -84,18 +84,18 @@ func (e events) contains(op fsnotify.Op) bool {
 // UnmarshalYAML unmarshals the string array
 // into a event "set" for fast loopup
 func (e *events) UnmarshalYAML(unmarshal func(interface{}) error) error {
-	var events []string
+	s := ""
 
-	if err := unmarshal(&events); err != nil {
+	if err := unmarshal(&s); err != nil {
 		return err
-	} else if len(events) == 0 {
+	} else if s == "" {
 		return nil
 	}
 
 	*e = map[fsnotify.Op]struct{}{}
 
-	for _, c := range events {
-		switch strings.ToLower(c) {
+	for _, c := range strings.Split(s, ",") {
+		switch strings.ToLower(strings.TrimSpace(c)) {
 		case "create":
 			(*e)[fsnotify.Create] = struct{}{}
 		case "write":

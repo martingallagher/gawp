@@ -21,7 +21,7 @@ The configuration file location can be set using the `-config my.conf` command-l
 recursive: true                 # Watch directories recursively
 workers: 4                      # Number of concurrent workers (high numbers can thrash IO)
 #logfile: gawp.log              # Gawp logfile, default: stdout
-events: [write, create, rename] # Actionable events (create, write, rename, remove, chmod)
+events: write, create, rename	# Actionable events (supported: create, write, rename, remove, chmod)
 
 # Rules are regular expression strings (https://code.google.com/p/re2/wiki/Syntax)
 rules:
