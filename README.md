@@ -1,4 +1,4 @@
-# ![Gawp](http://praegress.us/gawp.png)
+# ![Gawp](http://praegress.us/gawp-logo)
 A simple, configurable, file watching, job execution tool implemented in Go.
 
 **gawp**<br>ɡɔːp/<br>*verb, British, informal*<br>stare openly in a stupid or rude manner.
@@ -11,7 +11,7 @@ A simple, configurable, file watching, job execution tool implemented in Go.
 The following assumes your Go $GOPATH/bin is on your $PATH environmental variable (`export PATH=$PATH:$GOPATH/bin`).
 
 ## Configuration
-By default Gawp attempts to read `.gawp` in the active directory. The file format is YAML (http://www.yaml.org/).
+By default Gawp attempts to read `.gawp` in the active directory. The file format is [YAML](http://www.yaml.org/).
 
 The configuration file location can be set using the `-config my.conf` command-line flag.
 
@@ -40,3 +40,6 @@ Assuming correctly configured `web/assets/.gawp` file: `cd web/assets/ && gawp`
 
 # Contributions
 Bug fixes and feature requests welcome.
+
+# Contributors
+- [Martin Gallagher](http://martingallagher.com/)
