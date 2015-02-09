@@ -1,4 +1,4 @@
-# ![Gawp](http://praegress.us/gawp-logo)
+# ![Gawp](http://praegress.us/gawp-logo.png)
 A simple, configurable, file watching, job execution tool implemented in Go.
 
 **gawp**<br>ɡɔːp/<br>*verb, British, informal*<br>stare openly in a stupid or rude manner.
@@ -32,7 +32,7 @@ write, create, rename:			# Actionable events (supported: create, write, rename, 
 
 create:
   .*:
-  - echo \"created $file\"
+  - echo \"created $file\"		# Rule submatches and file path can be accessed via $1, $2 ... $n (nth submatch) and $file
 ```
 
 # Usage
