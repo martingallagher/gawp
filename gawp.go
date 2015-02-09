@@ -17,11 +17,11 @@
 package main
 
 import (
+	"encoding/binary"
 	"errors"
 	"flag"
 	"fmt"
 	"hash/fnv"
-	"io"
 	"io/ioutil"
 	"log"
 	"os"
@@ -40,76 +40,34 @@ import (
 )
 
 var (
-	rules        []*rule
-	config       *configuration
-	logFile      *os.File
-	matches      map[int64]*match
-	matchesMu    = &sync.RWMutex{}
-	errNoRules   = errors.New("no rules")
-	errEmptyRule = errors.New("empty rule")
-	configFile   = flag.String("config", ".gawp", "Configuration file")
-	hasher64     = fnv.New64a()
-	hasher64Mu   = &sync.Mutex{}
+	config     *configuration
+	logFile    *os.File
+	rules      map[fsnotify.Op][]*rule
+	rulesMu    = &sync.RWMutex{}
+	matches    map[int64]*match
+	matchesMu  = &sync.RWMutex{}
+	errNoRules = errors.New("no rules")
+	configFile = flag.String("config", ".gawp", "Configuration file")
+	hasher64   = fnv.New64a()
+	hasher64Mu = &sync.Mutex{}
 )
 
 // Gawp configuration
 type configuration struct {
-	Recursive bool
-	Workers   int
-	Logfile   string
-	Events    events
-	Rules     map[string][]string
+	recursive bool
+	workers   int
+	logFile   string
 }
 
 type rule struct {
-	mu    *sync.Mutex
 	match *regexp.Regexp
 	cmds  []string
 }
 
 type match struct {
+	mu   *sync.Mutex
 	rule *rule
 	cmds [][]string
-}
-
-type events map[fsnotify.Op]struct{} // Emulate a "set"
-
-// Checks if the event exists in the events set
-func (e events) contains(op fsnotify.Op) bool {
-	_, exists := e[op]
-
-	return exists
-}
-
-// UnmarshalYAML unmarshals the string array
-// into a event "set" for fast loopup
-func (e *events) UnmarshalYAML(unmarshal func(interface{}) error) error {
-	s := ""
-
-	if err := unmarshal(&s); err != nil {
-		return err
-	} else if s == "" {
-		return nil
-	}
-
-	*e = map[fsnotify.Op]struct{}{}
-
-	for _, c := range strings.Split(s, ",") {
-		switch strings.ToLower(strings.TrimSpace(c)) {
-		case "create":
-			(*e)[fsnotify.Create] = struct{}{}
-		case "write":
-			(*e)[fsnotify.Write] = struct{}{}
-		case "rename":
-			(*e)[fsnotify.Rename] = struct{}{}
-		case "remove":
-			(*e)[fsnotify.Remove] = struct{}{}
-		case "chmod":
-			(*e)[fsnotify.Chmod] = struct{}{}
-		}
-	}
-
-	return nil
 }
 
 func main() {
@@ -124,22 +82,20 @@ func main() {
 
 	defer logFile.Close()
 
-	if rules, err = load(dir, *configFile); err != nil {
+	if err = load(dir, *configFile); err != nil {
 		log.Fatalf("unable to load configuration file: %s (%s)", *configFile, err)
 	}
 
 	// Operating system threads that can execute user-level Go code simultaneously
-	if config.Workers > 1 {
+	if config.workers > 1 {
 		n := runtime.NumCPU()
 
-		if config.Workers < n {
-			n = config.Workers
+		if config.workers < n {
+			n = config.workers
 		}
 
 		runtime.GOMAXPROCS(n)
 	}
-
-	log.Printf("loaded %d rules", len(rules))
 
 	// File system notifications
 	watcher, err := fsnotify.NewWatcher()
@@ -150,7 +106,7 @@ func main() {
 
 	defer watcher.Close()
 
-	if config.Recursive {
+	if config.recursive {
 		c := 0
 
 		// Watch root and child directories
@@ -179,19 +135,19 @@ func main() {
 	}
 
 	// Disable file system notifications for the log file
-	if config.Logfile != "" {
-		watcher.Remove(config.Logfile)
+	if config.logFile != "" {
+		watcher.Remove(config.logFile)
 	}
 
 	// We should always be able to run atleast 1 job
-	if config.Workers < 1 {
-		config.Workers = 1
+	if config.workers < 1 {
+		config.workers = 1
 	}
 
 	var (
 		filename string                                // Current filename path
 		signals  = make(chan os.Signal, 2)             // OS signal capture
-		throttle = make(chan struct{}, config.Workers) // Worker throttle
+		throttle = make(chan struct{}, config.workers) // Worker throttle
 		wg       = &sync.WaitGroup{}
 	)
 
@@ -204,10 +160,6 @@ func main() {
 	for {
 		select {
 		case event := <-watcher.Events:
-			if !config.Events.contains(event.Op) {
-				continue
-			}
-
 			throttle <- struct{}{}
 
 			// Reload config file
@@ -217,11 +169,9 @@ func main() {
 
 				log.Println("reloading config file")
 
-				if rules, err = load(dir, filename); err != nil {
+				if err = load(dir, filename); err != nil {
 					log.Fatal(err)
 				}
-
-				log.Printf("loaded %d rules", len(rules))
 
 				<-throttle
 
@@ -230,7 +180,7 @@ func main() {
 
 			wg.Add(1)
 
-			go worker(throttle, wg, filename)
+			go worker(throttle, wg, event.Op, filename)
 
 		case err = <-watcher.Errors:
 			log.Println("fsnotify error:", err)
@@ -241,23 +191,23 @@ func main() {
 	}
 }
 
-func worker(throttle chan struct{}, wg *sync.WaitGroup, f string) {
+func worker(throttle chan struct{}, wg *sync.WaitGroup, e fsnotify.Op, f string) {
 	defer func() {
 		<-throttle
 
 		wg.Done()
 	}()
 
-	m := findMatch(f)
+	m := findMatch(e, f)
 
 	if m == nil {
 		return
 	}
 
-	// Atomicity for the given rule
-	m.rule.mu.Lock()
+	// Atomicity for the given match
+	m.mu.Lock()
 
-	defer m.rule.mu.Unlock()
+	defer m.mu.Unlock()
 
 	var cmd *exec.Cmd
 
@@ -278,8 +228,18 @@ func worker(throttle chan struct{}, wg *sync.WaitGroup, f string) {
 
 // findMatch attempts to find a rule match for file path
 // On success caches the match for fast future lookups
-func findMatch(f string) *match {
-	h := hash64(f)
+func findMatch(e fsnotify.Op, f string) *match {
+	var (
+		m *match
+		h = hash64(e, f)
+	)
+
+	// Cache for fast lookup
+	defer func() {
+		matchesMu.Lock()
+		matches[h] = m
+		matchesMu.Unlock()
+	}()
 
 	// Fast map lookup, circumvent regular expressions
 	matchesMu.RLock()
@@ -290,20 +250,28 @@ func findMatch(f string) *match {
 		return c
 	}
 
-	var (
-		s [][]string
-		m *match
-	)
+	rulesMu.RLock()
+
+	defer rulesMu.RUnlock()
+
+	// Check there's rules associated with the event type
+	r, exists := rules[e]
+
+	if !exists {
+		return nil
+	}
 
 	// Test each rule for a match
-	for _, r := range rules {
-		if s = r.match.FindAllStringSubmatch(f, -1); s == nil {
+	for _, c := range r {
+		s := c.match.FindAllStringSubmatch(f, -1)
+
+		if s == nil {
 			continue
 		}
 
-		m = &match{rule: r}
+		m = &match{&sync.Mutex{}, c, nil}
 
-		for _, cmd := range r.cmds {
+		for _, cmd := range c.cmds {
 			for i := range s[0] {
 				if i == 0 {
 					continue
@@ -318,87 +286,161 @@ func findMatch(f string) *match {
 		break
 	}
 
-	// Cache for fast lookup
-	matchesMu.Lock()
-	matches[h] = m
-	matchesMu.Unlock()
-
 	return m
 }
 
 // loads the Gawp config file and handles the loading of rules
-func load(dir string, f string) ([]*rule, error) {
+func load(dir string, f string) error {
+	// Init/reset config, rules and matches cache
+	config = &configuration{}
+	rules = map[fsnotify.Op][]*rule{}
+	matches = map[int64]*match{}
+
+	// Open config file
 	h, err := os.Open(dir + "/" + f)
 
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	defer h.Close()
 
-	if config, err = loadConfig(h); err != nil {
-		return nil, err
-	}
-
-	if err = setLogFile(dir); err != nil {
-		return nil, err
-	}
-
-	return loadRules()
-}
-
-func loadConfig(in io.Reader) (*configuration, error) {
-	b, err := ioutil.ReadAll(in)
+	b, err := ioutil.ReadAll(h)
 
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	var c *configuration
+	var c map[string]interface{}
 
 	if err = yaml.Unmarshal(b, &c); err != nil {
-		return nil, err
+		return err
 	}
 
-	return c, nil
-}
-
-func loadRules() (rules []*rule, err error) {
-	if len(config.Rules) == 0 {
-		return nil, errNoRules
+	if len(c) == 0 {
+		return errNoRules
 	}
 
-	for k, v := range config.Rules {
-		r := &rule{cmds: v, mu: &sync.Mutex{}}
+	for k, v := range c {
+		switch k {
+		case "recursive":
+			config.recursive, _ = v.(bool)
 
-		if r.match, err = regexp.Compile(k); err != nil {
-			return nil, fmt.Errorf("rule compilation error: %s (%s)", k, err)
+		case "workers":
+			config.workers, _ = v.(int)
+
+		case "logfile":
+			config.logFile, _ = v.(string)
+
+		default:
+			if err = parseRules(k, v); err != nil {
+				return err
+			}
 		}
-
-		rules = append(rules, r)
 	}
 
-	// Init/reset matches cache
-	matches = map[int64]*match{}
+	if config.workers < 1 {
+		config.workers = 1
+	}
 
-	return rules, nil
+	if err = setLogFile(dir, config.logFile); err != nil {
+		return err
+	}
+
+	return nil
 }
 
-func setLogFile(dir string) (err error) {
-	if config.Logfile == "" {
+func parseRules(s string, i interface{}) (err error) {
+	e := parseEvents(s)
+
+	if len(e) == 0 {
+		return nil
+	}
+
+	switch c := i.(type) {
+	case map[interface{}]interface{}:
+		for k, v := range c {
+			// Regular expression
+			m, ok := k.(string)
+
+			if !ok {
+				return nil
+			}
+
+			// Commands
+			p, ok := v.([]interface{})
+
+			if !ok || len(p) == 0 {
+				return nil
+			}
+
+			r := &rule{}
+
+			if r.match, err = regexp.Compile(m); err != nil {
+				return fmt.Errorf("rule compilation error: %s (%s)", m, err)
+			}
+
+			for _, c := range p {
+				cmd, ok := c.(string)
+
+				if !ok || cmd == "" {
+					continue
+				}
+
+				if cmd = strings.TrimSpace(cmd); cmd == "" {
+					continue
+				}
+
+				r.cmds = append(r.cmds, cmd)
+			}
+
+			if len(r.cmds) == 0 {
+				continue
+			}
+
+			// Add the rule to each event bucket
+			for _, c := range e {
+				rules[c] = append(rules[c], r)
+			}
+		}
+	}
+
+	return nil
+}
+
+func parseEvents(s string) (e []fsnotify.Op) {
+	for _, v := range strings.Split(s, ",") {
+		switch strings.ToLower(strings.TrimSpace(v)) {
+		case "create":
+			e = append(e, fsnotify.Create)
+		case "write":
+			e = append(e, fsnotify.Write)
+		case "rename":
+			e = append(e, fsnotify.Rename)
+		case "remove":
+			e = append(e, fsnotify.Remove)
+		case "chmod":
+			e = append(e, fsnotify.Chmod)
+		}
+	}
+
+	return
+}
+
+func setLogFile(dir string, f string) (err error) {
+	if f == "" {
 		return nil
 	}
 
 	// Relative path
-	if config.Logfile[0] != '/' {
-		config.Logfile = dir + "/" + config.Logfile
+	if f[0] != '/' {
+		f = dir + "/" + f
 	}
 
-	// Close current log file as location might have changed in the config
-	// No side effects
+	// Force log file rotation, no side effects
 	logFile.Close()
 
-	if logFile, err = os.OpenFile(config.Logfile, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0666); err != nil {
+	if logFile, err = os.OpenFile(f, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0666); err != nil {
 		return err
 	}
 
@@ -408,12 +450,13 @@ func setLogFile(dir string) (err error) {
 }
 
 // hash64 returns the hash of the given string as int64
-func hash64(s string) int64 {
+func hash64(e fsnotify.Op, s string) int64 {
 	hasher64Mu.Lock()
 
 	defer hasher64Mu.Unlock()
 
 	hasher64.Reset()
+	binary.Write(hasher64, binary.LittleEndian, e)
 	hasher64.Write([]byte(s))
 
 	return int64(hasher64.Sum64())
