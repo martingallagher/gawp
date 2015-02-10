@@ -95,6 +95,9 @@ func main() {
 		}
 
 		runtime.GOMAXPROCS(n)
+	} else if config.workers < 1 {
+		// Atleast 1 worker needed
+		config.workers = 1
 	}
 
 	// File system notifications
@@ -136,12 +139,9 @@ func main() {
 
 	// Disable file system notifications for the log file
 	if config.logFile != "" {
-		watcher.Remove(config.logFile)
-	}
-
-	// We should always be able to run atleast 1 job
-	if config.workers < 1 {
-		config.workers = 1
+		if err = watcher.Remove(config.logFile); err != nil {
+			log.Println(err)
+		}
 	}
 
 	var (
@@ -171,11 +171,18 @@ func main() {
 			if filename == *configFile {
 				// Wait for active workers
 				wg.Wait()
-
 				log.Println("reloading config file")
+
+				l := config.logFile
 
 				if err = load(dir, filename); err != nil {
 					log.Fatal(err)
+				}
+
+				if config.logFile != "" && config.logFile != l {
+					if err = watcher.Remove(config.logFile); err != nil {
+						log.Println(err)
+					}
 				}
 
 				<-throttle
@@ -358,7 +365,7 @@ func load(dir, f string) error {
 	return nil
 }
 
-func parseRules(s string, i interface{}) (err error) {
+func parseRules(s string, i interface{}) error {
 	e := parseEvents(s)
 
 	if len(e) == 0 {
@@ -435,8 +442,10 @@ func parseEvents(s string) (e []fsnotify.Op) {
 	return
 }
 
-func setLogFile(dir, f string) (err error) {
+func setLogFile(dir, f string) error {
 	if f == "" {
+		log.SetOutput(os.Stdout)
+
 		return nil
 	}
 
@@ -447,8 +456,9 @@ func setLogFile(dir, f string) (err error) {
 
 	// Force log file rotation, no side effects
 	logFile.Close()
+	logFile, err := os.OpenFile(f, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0666)
 
-	if logFile, err = os.OpenFile(f, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0666); err != nil {
+	if err != nil {
 		return err
 	}
 
