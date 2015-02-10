@@ -372,6 +372,8 @@ func parseRules(s string, i interface{}) error {
 		return nil
 	}
 
+	var err error
+
 	switch c := i.(type) {
 	case map[interface{}]interface{}:
 		for k, v := range c {
