@@ -18,22 +18,26 @@ The configuration file location can be set using the `-config my.conf` command-l
 **Example .gawp file:**
 
 ```yaml
-recursive: true                 # Watch directories recursively
-verbose: false                  # Verbose logging
-workers: 4                      # Number of concurrent workers (high numbers can thrash IO)
-#logfile: gawp.log              # Gawp logfile, default: stdout
+recursive: true           # Watch directories recursively
+verbose: false            # Verbose logging
+workers: 4                # Number of concurrent workers (high numbers can thrash IO)
+#logfile: gawp.log        # Gawp logfile, default: stdout
 
-write, create, rename:			# Actionable events (supported: create, write, rename, remove, chmod)
-  (?i)([a-z]+)\.src\.js$:		# Rules are regular expression strings (https://code.google.com/p/re2/wiki/Syntax)
+write, create, rename:    # Actionable events (supported: create, write, rename, remove, chmod)
+  (?i)([a-z]+)\.src\.js$: # Rules are regular expression strings (https://code.google.com/p/re2/wiki/Syntax)
   - java -jar ~/compiler.jar -O=ADVANCED --language_in=ECMASCRIPT5_STRICT --formatting=SINGLE_QUOTES --define='DEBUG=false' --js_output_file=scripts/$1.js $file
 
   (?i)[a-z]+\.scss:
   - compass compile --boring --time -s compressed --css-dir styles/ $file
-  - echo HELLO DENNIS!			# Rules can have multiple commands; output is written as-is to the Gawp log
+  - echo HELLO DENNIS!    # Rules can have multiple commands; output is written as-is to the Gawp log
 
 create:
   .*:
-  - echo \"created $file\"		# Rule submatches and file path can be accessed via $1, $2 ... $n (nth submatch) and $file
+  - echo created $file    # Rule submatches and file path can be accessed via $1, $2 ... $n (nth submatch) and $file
+
+remove:
+  .*:
+  - echo removed $file
 ```
 
 # Usage
