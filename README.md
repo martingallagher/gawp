@@ -19,6 +19,7 @@ The configuration file location can be set using the `-config my.conf` command-l
 
 ```yaml
 recursive: true                 # Watch directories recursively
+verbose: false                  # Verbose logging
 workers: 4                      # Number of concurrent workers (high numbers can thrash IO)
 #logfile: gawp.log              # Gawp logfile, default: stdout
 

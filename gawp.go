@@ -54,9 +54,9 @@ var (
 
 // Gawp configuration
 type configuration struct {
-	recursive bool
-	workers   int
-	logFile   string
+	recursive, verbose bool
+	workers            int
+	logFile            string
 }
 
 type rule struct {
@@ -145,7 +145,6 @@ func main() {
 	}
 
 	var (
-		filename string                                // Current filename path
 		signals  = make(chan os.Signal, 2)             // OS signal capture
 		throttle = make(chan struct{}, config.workers) // Worker throttle
 		wg       = &sync.WaitGroup{}
@@ -160,10 +159,16 @@ func main() {
 	for {
 		select {
 		case event := <-watcher.Events:
+			filename := event.Name[len(dir)+1:]
+
+			if config.verbose {
+				log.Println(event.String())
+			}
+
 			throttle <- struct{}{}
 
 			// Reload config file
-			if filename = event.Name[len(dir)+1:]; filename == *configFile {
+			if filename == *configFile {
 				// Wait for active workers
 				wg.Wait()
 
@@ -234,13 +239,6 @@ func findMatch(e fsnotify.Op, f string) *match {
 		h = hash64(e, f)
 	)
 
-	// Cache for fast lookup
-	defer func() {
-		matchesMu.Lock()
-		matches[h] = m
-		matchesMu.Unlock()
-	}()
-
 	// Fast map lookup, circumvent regular expressions
 	matchesMu.RLock()
 	c, exists := matches[h]
@@ -249,6 +247,13 @@ func findMatch(e fsnotify.Op, f string) *match {
 	if exists {
 		return c
 	}
+
+	// Cache for fast lookup
+	defer func() {
+		matchesMu.Lock()
+		matches[h] = m
+		matchesMu.Unlock()
+	}()
 
 	rulesMu.RLock()
 
@@ -290,7 +295,7 @@ func findMatch(e fsnotify.Op, f string) *match {
 }
 
 // loads the Gawp config file and handles the loading of rules
-func load(dir string, f string) error {
+func load(dir, f string) error {
 	// Init/reset config, rules and matches cache
 	config = &configuration{}
 	rules = map[fsnotify.Op][]*rule{}
@@ -325,6 +330,9 @@ func load(dir string, f string) error {
 		switch k {
 		case "recursive":
 			config.recursive, _ = v.(bool)
+
+		case "verbose":
+			config.verbose, _ = v.(bool)
 
 		case "workers":
 			config.workers, _ = v.(int)
@@ -427,7 +435,7 @@ func parseEvents(s string) (e []fsnotify.Op) {
 	return
 }
 
-func setLogFile(dir string, f string) (err error) {
+func setLogFile(dir, f string) (err error) {
 	if f == "" {
 		return nil
 	}
