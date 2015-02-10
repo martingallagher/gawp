@@ -44,7 +44,7 @@ var (
 	logFile    *os.File
 	rules      map[fsnotify.Op][]*rule
 	rulesMu    = &sync.RWMutex{}
-	matches    map[int64]*match
+	matches    map[uint64]*match
 	matchesMu  = &sync.RWMutex{}
 	errNoRules = errors.New("no rules")
 	configFile = flag.String("config", ".gawp", "Configuration file")
@@ -299,7 +299,7 @@ func load(dir, f string) error {
 	// Init/reset config, rules and matches cache
 	config = &configuration{}
 	rules = map[fsnotify.Op][]*rule{}
-	matches = map[int64]*match{}
+	matches = map[uint64]*match{}
 
 	// Open config file
 	h, err := os.Open(dir + "/" + f)
@@ -457,8 +457,8 @@ func setLogFile(dir, f string) (err error) {
 	return nil
 }
 
-// hash64 returns the hash of the given string as int64
-func hash64(e fsnotify.Op, s string) int64 {
+// hash64 returns the hash of the given FS operation & string as uint64
+func hash64(e fsnotify.Op, s string) uint64 {
 	hasher64Mu.Lock()
 
 	defer hasher64Mu.Unlock()
@@ -467,5 +467,5 @@ func hash64(e fsnotify.Op, s string) int64 {
 	binary.Write(hasher64, binary.LittleEndian, e)
 	hasher64.Write([]byte(s))
 
-	return int64(hasher64.Sum64())
+	return hasher64.Sum64()
 }
