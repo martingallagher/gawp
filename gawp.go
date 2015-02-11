@@ -42,6 +42,7 @@ import (
 var (
 	config     *configuration
 	logFile    *os.File
+	watcher    *fsnotify.Watcher
 	rules      map[fsnotify.Op][]*rule
 	rulesMu    = &sync.RWMutex{}
 	matches    map[uint64]*match
@@ -101,41 +102,23 @@ func main() {
 	}
 
 	// File system notifications
-	watcher, err := fsnotify.NewWatcher()
-
-	if err != nil {
+	if watcher, err = fsnotify.NewWatcher(); err != nil {
 		log.Fatal(err)
 	}
 
 	defer watcher.Close()
 
 	if config.recursive {
-		c := 0
-
 		// Watch root and child directories
-		filepath.Walk(dir+"/", func(path string, f os.FileInfo, err error) error {
-			if !f.IsDir() {
-				return nil
-			}
-
-			if n := path[len(dir):]; n != "/" && n[1] == '.' {
-				return nil
-			}
-
-			if err := watcher.Add(path); err != nil {
-				log.Printf("unable to watch path: %s (%s)", path, err)
-			}
-
-			c++
-
-			return nil
-		})
-
-		log.Printf("watching %d directories", c)
+		if err = filepath.Walk(dir+"/", walk); err != nil {
+			log.Fatal(err)
+		}
 	} else if err = watcher.Add(dir); err != nil {
 		//  Only watch the root dir
 		log.Fatal(err)
 	}
+
+	log.Println("started Gawp")
 
 	// Disable file system notifications for the log file
 	if config.logFile != "" {
@@ -190,6 +173,13 @@ func main() {
 				continue
 			}
 
+			// Add or stop watching directories
+			if err = handleEvent(event); err != nil {
+				log.Println(err)
+
+				continue
+			}
+
 			wg.Add(1)
 
 			go worker(throttle, wg, event.Op, filename)
@@ -236,6 +226,56 @@ func worker(throttle chan struct{}, wg *sync.WaitGroup, e fsnotify.Op, f string)
 			log.Printf("%s\n%s", m.rule.cmds[i], b)
 		}
 	}
+}
+
+// walk implements filepath.WalkFunc; adding each directory
+// to the file system notifications watcher
+func walk(path string, f os.FileInfo, err error) error {
+	if !f.IsDir() || f.Name()[0] == '.' {
+		return nil
+	}
+
+	if err := watcher.Add(path); err != nil {
+		log.Printf("unable to watch path: %s (%s)", path, err)
+	}
+
+	return nil
+}
+
+// handleEvent determines the nature of the event, adding
+// or removing directories to the file system notifications watcher
+func handleEvent(e fsnotify.Event) error {
+	create := e.Op&fsnotify.Create == fsnotify.Create
+
+	if !create && e.Op&fsnotify.Remove != fsnotify.Remove {
+		return nil
+	}
+
+	h, err := os.Open(e.Name)
+
+	if err != nil {
+		return err
+	}
+
+	defer h.Close()
+
+	s, err := h.Stat()
+
+	if err != nil {
+		return err
+	} else if !s.IsDir() {
+		return nil
+	}
+
+	if create {
+		if config.recursive {
+			return filepath.Walk(e.Name+"/", walk)
+		}
+
+		return watcher.Add(e.Name)
+	}
+
+	return watcher.Remove(e.Name)
 }
 
 // findMatch attempts to find a rule match for file path
@@ -301,7 +341,7 @@ func findMatch(e fsnotify.Op, f string) *match {
 	return m
 }
 
-// loads the Gawp config file and handles the loading of rules
+// load loads the Gawp config file and handles the loading of rules
 func load(dir, f string) error {
 	// Init/reset config, rules and matches cache
 	config = &configuration{}
@@ -365,6 +405,8 @@ func load(dir, f string) error {
 	return nil
 }
 
+// parseRules builds the rules map, adding rules into
+// its defined event "bucket"
 func parseRules(s string, i interface{}) error {
 	e := parseEvents(s)
 
@@ -425,6 +467,8 @@ func parseRules(s string, i interface{}) error {
 	return nil
 }
 
+// parseEvents returns the fsnotify.Op values
+// for the events in the string
 func parseEvents(s string) (e []fsnotify.Op) {
 	for _, v := range strings.Split(s, ",") {
 		switch strings.ToLower(strings.TrimSpace(v)) {
@@ -444,6 +488,7 @@ func parseEvents(s string) (e []fsnotify.Op) {
 	return
 }
 
+// setLogFile sets the logger output destination
 func setLogFile(dir, f string) error {
 	if f == "" {
 		log.SetOutput(os.Stdout)
