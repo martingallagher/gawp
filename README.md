@@ -18,9 +18,9 @@ The configuration file location can be set using the `-config my.conf` command-l
 **Example .gawp file:**
 
 ```yaml
-recursive: true           # Watch directories recursively
-verbose: false            # Verbose logging
-workers: 4                # Number of concurrent workers (high numbers can thrash IO)
+recursive: true           # Watch directories recursively, default: true
+verbose: false            # Verbose logging, default: false
+workers: 4                # Number of concurrent workers (high numbers can thrash IO), default: number CPUs / 2 (minimum 1)
 #logfile: gawp.log        # Gawp logfile, default: stdout
 
 write, create, rename:    # Actionable events (supported: create, write, rename, remove, chmod)
@@ -34,6 +34,25 @@ write, create, rename:    # Actionable events (supported: create, write, rename,
 create:
   .*:
   - echo created $file    # Rule submatches and file path can be accessed via $1, $2 ... $n (nth submatch) and $file
+
+remove:
+  .*:
+  - echo removed $file
+```
+
+Configuration defaults fulfil most user's requirements, resulting in a config file that just defines rules:
+
+```yaml
+write, create, rename:
+  (?i)([a-z]+)\.src\.js$:
+  - java -jar ~/compiler.jar -O=ADVANCED --language_in=ECMASCRIPT5_STRICT --formatting=SINGLE_QUOTES --define='DEBUG=false' --js_output_file=scripts/$1.js $file
+
+  (?i)[a-z]+\.scss:
+  - compass compile --boring -s compressed --css-dir styles/ $file
+
+create:
+  .*:
+  - echo created $file
 
 remove:
   .*:

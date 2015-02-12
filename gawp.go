@@ -18,7 +18,6 @@ package main
 
 import (
 	"encoding/binary"
-	"errors"
 	"flag"
 	"fmt"
 	"hash/fnv"
@@ -47,7 +46,6 @@ var (
 	rulesMu    = &sync.RWMutex{}
 	matches    map[uint64]*match
 	matchesMu  = &sync.RWMutex{}
-	errNoRules = errors.New("no rules")
 	configFile = flag.String("config", ".gawp", "Configuration file")
 	hasher64   = fnv.New64a()
 	hasher64Mu = &sync.Mutex{}
@@ -85,20 +83,6 @@ func main() {
 
 	if err = load(dir, *configFile); err != nil {
 		log.Fatalf("unable to load configuration file: %s (%s)", *configFile, err)
-	}
-
-	// Operating system threads that can execute user-level Go code simultaneously
-	if config.workers > 1 {
-		n := runtime.NumCPU()
-
-		if config.workers < n {
-			n = config.workers
-		}
-
-		runtime.GOMAXPROCS(n)
-	} else if config.workers < 1 {
-		// Atleast 1 worker needed
-		config.workers = 1
 	}
 
 	// File system notifications
@@ -170,6 +154,8 @@ func main() {
 
 				<-throttle
 
+				throttle = make(chan struct{}, config.workers)
+
 				continue
 			}
 
@@ -231,7 +217,8 @@ func worker(throttle chan struct{}, wg *sync.WaitGroup, e fsnotify.Op, f string)
 // walk implements filepath.WalkFunc; adding each directory
 // to the file system notifications watcher
 func walk(path string, f os.FileInfo, err error) error {
-	if !f.IsDir() || f.Name()[0] == '.' {
+	// Ignore files and hidden directories
+	if !f.IsDir() || f.Name()[0] == '.' || strings.Contains(path, "/.") {
 		return nil
 	}
 
@@ -344,7 +331,7 @@ func findMatch(e fsnotify.Op, f string) *match {
 // load loads the Gawp config file and handles the loading of rules
 func load(dir, f string) error {
 	// Init/reset config, rules and matches cache
-	config = &configuration{}
+	config = &configuration{recursive: true}
 	rules = map[fsnotify.Op][]*rule{}
 	matches = map[uint64]*match{}
 
@@ -369,10 +356,6 @@ func load(dir, f string) error {
 		return err
 	}
 
-	if len(c) == 0 {
-		return errNoRules
-	}
-
 	for k, v := range c {
 		switch k {
 		case "recursive":
@@ -394,9 +377,24 @@ func load(dir, f string) error {
 		}
 	}
 
-	if config.workers < 1 {
-		config.workers = 1
+	// Determine operating system threads that can execute user-level Go code simultaneously
+	if config.workers != 1 {
+		switch n := runtime.NumCPU(); config.workers {
+		case 0:
+			if n >= 4 {
+				config.workers = n / 2
+			} else {
+				config.workers = 1
+			}
+
+		default:
+			if config.workers > n {
+				config.workers = n
+			}
+		}
 	}
+
+	runtime.GOMAXPROCS(config.workers)
 
 	if err = setLogFile(dir, config.logFile); err != nil {
 		return err
@@ -503,9 +501,10 @@ func setLogFile(dir, f string) error {
 
 	// Force log file rotation, no side effects
 	logFile.Close()
-	logFile, err := os.OpenFile(f, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0666)
 
-	if err != nil {
+	var err error
+
+	if logFile, err = os.OpenFile(f, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0666); err != nil {
 		return err
 	}
 
