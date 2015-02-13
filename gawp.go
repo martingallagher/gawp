@@ -238,15 +238,14 @@ func handleEvent(e fsnotify.Event) error {
 		return nil
 	}
 
-	h, err := os.Open(e.Name)
+	s, err := os.Stat(e.Name)
 
 	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
 		return err
 	}
-
-	defer h.Close()
-
-	s, err := h.Stat()
 
 	if err != nil {
 		return err
