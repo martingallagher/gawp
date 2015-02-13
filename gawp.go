@@ -238,15 +238,15 @@ func handleEvent(e fsnotify.Event) error {
 		return nil
 	}
 
-	h, err := os.Open(e.Name)
+	s, err := os.Stat(e.Name)
 
 	if err != nil {
+		// file is already removed
+		if os.IsNotExist(err) {
+			return watcher.Remove(e.Name)
+		}
 		return err
 	}
-
-	defer h.Close()
-
-	s, err := h.Stat()
 
 	if err != nil {
 		return err
