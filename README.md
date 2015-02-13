@@ -23,7 +23,7 @@ verbose: false            # Verbose logging, default: false
 workers: 4                # Number of concurrent workers (high numbers can thrash IO), default: number CPUs / 2 (minimum 1)
 #logfile: gawp.log        # Gawp logfile, default: stdout
 
-write, create, rename:    # Actionable events (supported: create, write, rename, remove, chmod)
+write, create, rename:    # Actionable events (supported: create, write, rename, remove, chmod), executed sequentially
   (?i)([a-z]+)\.src\.js$: # Rules are regular expression strings (https://code.google.com/p/re2/wiki/Syntax)
   - java -jar ~/compiler.jar -O=ADVANCED --language_in=ECMASCRIPT5_STRICT --formatting=SINGLE_QUOTES --define='DEBUG=false' --js_output_file=scripts/$1.js $file
 
