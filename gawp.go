@@ -217,9 +217,14 @@ func worker(throttle chan struct{}, wg *sync.WaitGroup, e fsnotify.Op, f string)
 // walk implements filepath.WalkFunc; adding each directory
 // to the file system notifications watcher
 func walk(path string, f os.FileInfo, err error) error {
-	// Ignore files and hidden directories
-	if !f.IsDir() || f.Name()[0] == '.' || strings.Contains(path, "/.") {
+	// Ignore files
+	if !f.IsDir() {
 		return nil
+	}
+
+	// Ignore hidden directories
+	if f.Name()[0] == '.' {
+		return filepath.SkipDir
 	}
 
 	if err := watcher.Add(path); err != nil {
@@ -232,21 +237,11 @@ func walk(path string, f os.FileInfo, err error) error {
 // handleEvent determines the nature of the event, adding
 // or removing directories to the file system notifications watcher
 func handleEvent(e fsnotify.Event) error {
-	create := e.Op&fsnotify.Create == fsnotify.Create
-
-	if !create && e.Op&fsnotify.Remove != fsnotify.Remove {
+	if e.Op&fsnotify.Create != fsnotify.Create {
 		return nil
 	}
 
-	h, err := os.Open(e.Name)
-
-	if err != nil {
-		return err
-	}
-
-	defer h.Close()
-
-	s, err := h.Stat()
+	s, err := os.Stat(e.Name)
 
 	if err != nil {
 		return err
@@ -254,15 +249,11 @@ func handleEvent(e fsnotify.Event) error {
 		return nil
 	}
 
-	if create {
-		if config.recursive {
-			return filepath.Walk(e.Name+"/", walk)
-		}
-
-		return watcher.Add(e.Name)
+	if config.recursive {
+		return filepath.Walk(e.Name+"/", walk)
 	}
 
-	return watcher.Remove(e.Name)
+	return watcher.Add(e.Name)
 }
 
 // findMatch attempts to find a rule match for file path
