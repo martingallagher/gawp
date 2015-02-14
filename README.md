@@ -25,6 +25,7 @@ workers: 4                # Number of concurrent workers (high numbers can thras
 
 write, create, rename:    # Actionable events (supported: create, write, rename, remove, chmod), executed sequentially
   (?i)([a-z]+)\.src\.js$: # Rules are regular expression strings (https://code.google.com/p/re2/wiki/Syntax)
+  - msg=`jshint $file`; if [ "$msg" ]; then notify-send -t 2000 "$msg"; fi
   - java -jar ~/compiler.jar -O=ADVANCED --language_in=ECMASCRIPT5_STRICT --formatting=SINGLE_QUOTES --define='DEBUG=false' --js_output_file=scripts/$1.js $file
 
   (?i)[a-z]+\.scss:

@@ -24,7 +24,6 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
-	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"regexp"
@@ -66,7 +65,7 @@ type rule struct {
 type match struct {
 	mu   *sync.Mutex
 	rule *rule
-	cmds [][]string
+	cmds []string
 }
 
 func main() {
@@ -197,16 +196,10 @@ func worker(throttle chan struct{}, wg *sync.WaitGroup, e fsnotify.Op, f string)
 
 	defer m.mu.Unlock()
 
-	var cmd *exec.Cmd
-
 	for i, c := range m.cmds {
-		if len(c) == 1 {
-			cmd = exec.Command(c[0])
-		} else {
-			cmd = exec.Command(c[0], c[1:]...)
-		}
+		b, err := cmd(c)
 
-		if b, err := cmd.Output(); err != nil {
+		if err != nil {
 			log.Printf("command (%s) error: %s", c, err)
 		} else if len(b) > 0 {
 			log.Printf("%s\n%s", m.rule.cmds[i], b)
@@ -310,7 +303,7 @@ func findMatch(e fsnotify.Op, f string) *match {
 				cmd = strings.Replace(cmd, "$"+strconv.Itoa(i), s[0][i], -1)
 			}
 
-			m.cmds = append(m.cmds, strings.Fields(strings.Replace(cmd, "$file", f, -1)))
+			m.cmds = append(m.cmds, strings.Replace(cmd, "$file", f, -1))
 		}
 
 		break
@@ -348,6 +341,7 @@ func load(dir, f string) error {
 	}
 
 	for k, v := range c {
+		// Conversions not tested for success; keep type defaults
 		switch k {
 		case "recursive":
 			config.recursive, _ = v.(bool)
