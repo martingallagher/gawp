@@ -46,6 +46,7 @@ Configuration defaults fulfil most user's requirements, resulting in a config fi
 ```yaml
 write, create, rename:
   (?i)([a-z]+)\.src\.js$:
+  - msg=`jshint $file`; if [ "$msg" ]; then notify-send -t 2000 "$msg"; fi
   - java -jar ~/compiler.jar -O=ADVANCED --language_in=ECMASCRIPT5_STRICT --formatting=SINGLE_QUOTES --define='DEBUG=false' --js_output_file=scripts/$1.js $file
 
   (?i)[a-z]+\.scss:
@@ -62,6 +63,17 @@ remove:
 
 # Usage
 Assuming correctly configured `web/assets/.gawp` file: `cd web/assets/ && gawp`
+
+## Commands
+Gawp does no command validation. It pre-processes them, replacing variables and executes blindly. Rules can contain subcommands, which is useful when you need to use subcommand results. For example, on Linux/Ubuntu you might wish to lint the edits to your JavaScript files and create an alert via `notify-send`:
+
+```yaml
+write:
+  (?i)([a-z]+)\.src\.js$:
+  - msg=`jshint $file`; if [ "$msg" ]; then notify-send -t 2000 "$msg"; fi
+```
+
+If there's output from `jshint`, a notification bubble will be display to the user containing the result output.
 
 # Contributions
 Bug fixes and feature requests welcome.
