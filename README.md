@@ -4,9 +4,9 @@ A simple, configurable, file watching, job execution tool implemented in Go.
 **gawp**<br>ɡɔːp/<br>*verb, British, informal*<br>stare openly in a stupid or rude manner.
 
 ## Installation
-    go get gopkg.in/fsnotify.v1
-    go get gopkg.in/yaml.v2
-    go get github.com/martingallagher/gawp
+    go get -u gopkg.in/fsnotify.v1
+    go get -u gopkg.in/yaml.v2
+    go get -u github.com/martingallagher/gawp
 
 The following assumes your Go $GOPATH/bin is on your $PATH environmental variable (`export PATH=$PATH:$GOPATH/bin`).
 
