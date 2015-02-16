@@ -32,19 +32,24 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"gopkg.in/fsnotify.v1"
 	"gopkg.in/yaml.v2"
 )
 
+const atomicThreshold = 1250 * time.Millisecond
+
 var (
 	config     *configuration
 	logFile    *os.File
 	watcher    *fsnotify.Watcher
-	rules      map[fsnotify.Op][]*rule
-	rulesMu    = &sync.RWMutex{}
+	events     = map[uint64]time.Time{}
 	matches    map[uint64]*match
+	rules      map[fsnotify.Op][]*rule
+	eventsMu   = &sync.Mutex{}
 	matchesMu  = &sync.RWMutex{}
+	rulesMu    = &sync.RWMutex{}
 	configFile = flag.String("config", ".gawp", "Configuration file")
 	hasher64   = fnv.New64a()
 	hasher64Mu = &sync.Mutex{}
@@ -54,6 +59,7 @@ var (
 type configuration struct {
 	recursive, verbose bool
 	workers            int
+	atomicThreshold    time.Duration
 	logFile            string
 }
 
@@ -93,7 +99,7 @@ func main() {
 
 	if config.recursive {
 		// Watch root and child directories
-		if err = filepath.Walk(dir+"/", walk); err != nil {
+		if err = filepath.Walk(dir, walk); err != nil {
 			log.Fatal(err)
 		}
 	} else if err = watcher.Add(dir); err != nil {
@@ -127,11 +133,15 @@ func main() {
 		case event := <-watcher.Events:
 			filename := event.Name[len(dir)+1:]
 
-			if config.verbose {
-				log.Println(event.String())
+			if isAtomicOp(event.Op, filename) {
+				continue
 			}
 
 			throttle <- struct{}{}
+
+			if config.verbose {
+				log.Println(event.String())
+			}
 
 			// Reload config file
 			if filename == *configFile {
@@ -139,7 +149,7 @@ func main() {
 				wg.Wait()
 				log.Println("reloading config file")
 
-				l := config.logFile
+				l, w := config.logFile, config.workers
 
 				if err = load(dir, filename); err != nil {
 					log.Fatal(err)
@@ -153,7 +163,9 @@ func main() {
 
 				<-throttle
 
-				throttle = make(chan struct{}, config.workers)
+				if config.workers != w {
+					throttle = make(chan struct{}, config.workers)
+				}
 
 				continue
 			}
@@ -178,6 +190,24 @@ func main() {
 	}
 }
 
+// isAtomicOp attempts to detect atomic operations
+func isAtomicOp(e fsnotify.Op, f string) bool {
+	eventsMu.Lock()
+
+	defer eventsMu.Unlock()
+
+	h := hash64(e, f)
+	n := time.Now()
+
+	if t, exists := events[h]; exists && n.Sub(t) <= config.atomicThreshold {
+		return true
+	}
+
+	events[h] = n
+
+	return false
+}
+
 func worker(throttle chan struct{}, wg *sync.WaitGroup, e fsnotify.Op, f string) {
 	defer func() {
 		<-throttle
@@ -192,9 +222,9 @@ func worker(throttle chan struct{}, wg *sync.WaitGroup, e fsnotify.Op, f string)
 	}
 
 	// Atomicity for the given match
-	m.mu.Lock()
+	(*m).mu.Lock()
 
-	defer m.mu.Unlock()
+	defer (*m).mu.Unlock()
 
 	for i, c := range m.cmds {
 		b, err := cmd(c)
@@ -252,25 +282,24 @@ func handleEvent(e fsnotify.Event) error {
 // findMatch attempts to find a rule match for file path
 // On success caches the match for fast future lookups
 func findMatch(e fsnotify.Op, f string) *match {
-	var (
-		m *match
-		h = hash64(e, f)
-	)
+	matchesMu.Lock()
+
+	defer matchesMu.Unlock()
+
+	h := hash64(e, f)
 
 	// Fast map lookup, circumvent regular expressions
-	matchesMu.RLock()
 	c, exists := matches[h]
-	matchesMu.RUnlock()
 
 	if exists {
 		return c
 	}
 
-	// Cache for fast lookup
+	var m *match
+
+	// Always cache for fast lookup
 	defer func() {
-		matchesMu.Lock()
 		matches[h] = m
-		matchesMu.Unlock()
 	}()
 
 	rulesMu.RLock()
@@ -292,7 +321,7 @@ func findMatch(e fsnotify.Op, f string) *match {
 			continue
 		}
 
-		m = &match{&sync.Mutex{}, c, nil}
+		m = &match{mu: &sync.Mutex{}, rule: c, cmds: nil}
 
 		for _, cmd := range c.cmds {
 			for i := range s[0] {
@@ -316,8 +345,8 @@ func findMatch(e fsnotify.Op, f string) *match {
 func load(dir, f string) error {
 	// Init/reset config, rules and matches cache
 	config = &configuration{recursive: true}
-	rules = map[fsnotify.Op][]*rule{}
 	matches = map[uint64]*match{}
+	rules = map[fsnotify.Op][]*rule{}
 
 	// Open config file
 	h, err := os.Open(dir + "/" + f)
@@ -342,7 +371,7 @@ func load(dir, f string) error {
 
 	for k, v := range c {
 		// Conversions not tested for success; keep type defaults
-		switch k {
+		switch strings.ToLower(k) {
 		case "recursive":
 			config.recursive, _ = v.(bool)
 
@@ -352,6 +381,13 @@ func load(dir, f string) error {
 		case "workers":
 			config.workers, _ = v.(int)
 
+		case "atomicthreshold":
+			i, _ := v.(int)
+
+			if i > 0 {
+				config.atomicThreshold = time.Duration(i)
+			}
+
 		case "logfile":
 			config.logFile, _ = v.(string)
 
@@ -360,6 +396,11 @@ func load(dir, f string) error {
 				return err
 			}
 		}
+	}
+
+	// Default atomic threshold
+	if config.atomicThreshold == 0 {
+		config.atomicThreshold = atomicThreshold
 	}
 
 	// Determine operating system threads that can execute user-level Go code simultaneously

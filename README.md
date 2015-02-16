@@ -64,6 +64,9 @@ remove:
 # Usage
 Assuming correctly configured `web/assets/.gawp` file: `cd web/assets/ && gawp`
 
+## Atomic Save Support
+Some IDE's e.g. NetBeans, perform "atomic" saves. Gawp attempts to detect such operations, running the matching rule commands only once. The threshold duration setting for detecting atomic saves `atomicthreshold` can be adjusted if you find it is too liberal/conservative for your underlying storage.
+
 ## Commands
 Gawp does no command validation. It pre-processes them, replacing variables and executes blindly. Rules can contain subcommands, which is useful when you need to use subcommand results. For example, on Linux/Ubuntu you might wish to lint the edits to your JavaScript files and create an alert via `notify-send`:
 
@@ -73,7 +76,7 @@ write:
   - msg=`jshint $file`; if [ "$msg" ]; then notify-send -t 2000 "$msg"; fi
 ```
 
-If there's output from `jshint`, a notification bubble will be display to the user containing the result output.
+If there's output from `jshint`, a notification bubble will be displayed to the user with the result.
 
 # Contributions
 Bug fixes and feature requests welcome.
