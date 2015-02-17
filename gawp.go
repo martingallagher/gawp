@@ -38,7 +38,7 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
-const atomicThreshold = 1250 * time.Millisecond
+const atomicThreshold = 250 * time.Millisecond
 
 var (
 	config     *configuration
