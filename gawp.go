@@ -84,7 +84,23 @@ func main() {
 		log.Fatal(err)
 	}
 
-	defer logFile.Close()
+	lock, err := lockDir(dir)
+
+	if err != nil {
+		log.Fatalf("unable to lock active directory: %s", err)
+	}
+
+	defer func() {
+		if err := os.Remove(lock.Name()); err != nil {
+			log.Println(err)
+		}
+
+		if logFile == nil {
+			return
+		} else if err := logFile.Close(); err != nil {
+			log.Println(err)
+		}
+	}()
 
 	if err = load(dir, *configFile); err != nil {
 		log.Fatalf("unable to load configuration file: %s (%s)", *configFile, err)
@@ -117,7 +133,7 @@ func main() {
 	}
 
 	var (
-		signals  = make(chan os.Signal, 2)             // OS signal capture
+		signals  = make(chan os.Signal, 1)             // OS signal capture
 		throttle = make(chan struct{}, config.workers) // Worker throttle
 		wg       = &sync.WaitGroup{}
 	)
@@ -227,9 +243,7 @@ func worker(throttle chan struct{}, wg *sync.WaitGroup, e fsnotify.Op, f string)
 	defer (*m).mu.Unlock()
 
 	for i, c := range m.cmds {
-		b, err := cmd(c)
-
-		if err != nil {
+		if b, err := cmd(c); err != nil {
 			log.Printf("command (%s) error: %s", c, err)
 		} else if len(b) > 0 {
 			log.Printf("%s\n%s", m.rule.cmds[i], b)
@@ -240,17 +254,13 @@ func worker(throttle chan struct{}, wg *sync.WaitGroup, e fsnotify.Op, f string)
 // walk implements filepath.WalkFunc; adding each directory
 // to the file system notifications watcher
 func walk(path string, f os.FileInfo, err error) error {
-	// Ignore files
 	if !f.IsDir() {
+		// Ignore files
 		return nil
-	}
-
-	// Ignore hidden directories
-	if f.Name()[0] == '.' {
+	} else if f.Name()[0] == '.' {
+		// Ignore hidden directories
 		return filepath.SkipDir
-	}
-
-	if err := watcher.Add(path); err != nil {
+	} else if err := watcher.Add(path); err != nil {
 		log.Printf("unable to watch path: %s (%s)", path, err)
 	}
 
@@ -264,15 +274,11 @@ func handleEvent(e fsnotify.Event) error {
 		return nil
 	}
 
-	s, err := os.Stat(e.Name)
-
-	if err != nil {
+	if s, err := os.Stat(e.Name); err != nil {
 		return err
 	} else if !s.IsDir() {
 		return nil
-	}
-
-	if config.recursive {
+	} else if config.recursive {
 		return filepath.Walk(e.Name+"/", walk)
 	}
 
@@ -382,9 +388,7 @@ func load(dir, f string) error {
 			config.workers, _ = v.(int)
 
 		case "atomicthreshold":
-			i, _ := v.(int)
-
-			if i > 0 {
+			if i, _ := v.(int); i > 0 {
 				config.atomicThreshold = time.Duration(i)
 			}
 
@@ -468,9 +472,7 @@ func parseRules(s string, i interface{}) error {
 
 				if !ok || cmd == "" {
 					continue
-				}
-
-				if cmd = strings.TrimSpace(cmd); cmd == "" {
+				} else if cmd = strings.TrimSpace(cmd); cmd == "" {
 					continue
 				}
 
@@ -537,6 +539,13 @@ func setLogFile(dir, f string) error {
 	log.SetOutput(logFile)
 
 	return nil
+}
+
+// lockDir creates a lock file for the active directory
+func lockDir(dir string) (*os.File, error) {
+	f := os.TempDir() + "/gawp-" + strconv.FormatUint(hash64(0, dir), 36) + ".lock"
+
+	return os.OpenFile(f, os.O_CREATE|os.O_EXCL, os.ModeExclusive)
 }
 
 // hash64 returns the hash of the given FS operation & string as uint64
