@@ -23,6 +23,12 @@ verbose: false            # Verbose logging, default: false
 workers: 4                # Number of concurrent workers (high numbers can thrash IO), default: number CPUs / 2 (minimum 1)
 #logfile: gawp.log        # Gawp logfile, default: stdout
 
+#start:
+#  - start myscript
+
+#stop:
+#  - echo STOPPING!
+
 write, create, rename:    # Actionable events (supported: create, write, rename, remove, chmod), executed sequentially
   (?i)([a-z]+)\.src\.js$: # Rules are regular expression strings (https://code.google.com/p/re2/wiki/Syntax)
   - msg=`jshint $file`; if [ "$msg" ]; then notify-send -t 2000 "$msg"; fi

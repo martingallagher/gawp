@@ -18,6 +18,7 @@ package main
 
 import (
 	"encoding/binary"
+	"errors"
 	"flag"
 	"fmt"
 	"hash/fnv"
@@ -41,21 +42,22 @@ import (
 const atomicThreshold = 250 * time.Millisecond
 
 var (
-	config     *configuration
-	logFile    *os.File
-	watcher    *fsnotify.Watcher
-	events     = map[uint64]time.Time{}
-	matches    map[uint64]*match
-	rules      map[fsnotify.Op][]*rule
-	eventsMu   = &sync.Mutex{}
-	matchesMu  = &sync.RWMutex{}
-	rulesMu    = &sync.RWMutex{}
-	configFile = flag.String("config", ".gawp", "Configuration file")
-	hasher64   = fnv.New64a()
-	hasher64Mu = &sync.Mutex{}
+	config        *configuration
+	logFile       *os.File
+	watcher       *fsnotify.Watcher
+	events        = map[uint64]time.Time{}
+	matches       map[uint64]*match
+	rules         map[fsnotify.Op][]*rule
+	eventsMu      = &sync.Mutex{}
+	matchesMu     = &sync.RWMutex{}
+	rulesMu       = &sync.RWMutex{}
+	configFile    = flag.String("config", ".gawp", "Configuration file")
+	hasher64      = fnv.New64a()
+	hasher64Mu    = &sync.Mutex{}
+	errInvalidCmd = errors.New("invalid command")
 )
 
-// Gawp configuration
+// Gawp configuration.
 type configuration struct {
 	recursive, verbose bool
 	workers            int
@@ -102,8 +104,21 @@ func main() {
 		}
 	}()
 
-	if err = load(dir, *configFile); err != nil {
+	start, stop, err := load(dir, *configFile)
+
+	if err != nil {
 		log.Fatalf("unable to load configuration file: %s (%s)", *configFile, err)
+	}
+
+	// Run any start-up commands
+	if len(start) > 0 {
+		run(start, true)
+	}
+
+	if len(stop) > 0 {
+		defer func() {
+			run(stop, true)
+		}()
 	}
 
 	// File system notifications
@@ -167,7 +182,7 @@ func main() {
 
 				l, w := config.logFile, config.workers
 
-				if err = load(dir, filename); err != nil {
+				if _, stop, err = load(dir, filename); err != nil {
 					log.Fatal(err)
 				}
 
@@ -206,7 +221,7 @@ func main() {
 	}
 }
 
-// isAtomicOp attempts to detect atomic operations
+// isAtomicOp attempts to detect atomic operations.
 func isAtomicOp(e fsnotify.Op, f string) bool {
 	eventsMu.Lock()
 
@@ -242,17 +257,31 @@ func worker(throttle chan struct{}, wg *sync.WaitGroup, e fsnotify.Op, f string)
 
 	defer (*m).mu.Unlock()
 
-	for i, c := range m.cmds {
-		if b, err := cmd(c); err != nil {
-			log.Printf("command (%s) error: %s", c, err)
+	run(m.cmds, false)
+}
+
+func run(cmds []string, runnable bool) {
+	for _, v := range cmds {
+		c := cmd(v)
+
+		if runnable {
+			if err := c.Start(); err != nil {
+				log.Printf("command (%s) error: %s", v, err)
+			}
+
+			continue
+		}
+
+		if b, err := c.Output(); err != nil {
+			log.Printf("command (%s) error: %s", v, err)
 		} else if len(b) > 0 {
-			log.Printf("%s\n%s", m.rule.cmds[i], b)
+			log.Printf("%s\n%s", v, b)
 		}
 	}
 }
 
 // walk implements filepath.WalkFunc; adding each directory
-// to the file system notifications watcher
+// to the file system notifications watcher.
 func walk(path string, f os.FileInfo, err error) error {
 	if !f.IsDir() {
 		// Ignore files
@@ -268,7 +297,7 @@ func walk(path string, f os.FileInfo, err error) error {
 }
 
 // handleEvent determines the nature of the event, adding
-// or removing directories to the file system notifications watcher
+// or removing directories to the file system notifications watcher.
 func handleEvent(e fsnotify.Event) error {
 	if e.Op&fsnotify.Create != fsnotify.Create {
 		return nil
@@ -286,7 +315,7 @@ func handleEvent(e fsnotify.Event) error {
 }
 
 // findMatch attempts to find a rule match for file path
-// On success caches the match for fast future lookups
+// On success caches the match for fast future lookups.
 func findMatch(e fsnotify.Op, f string) *match {
 	matchesMu.Lock()
 
@@ -347,8 +376,9 @@ func findMatch(e fsnotify.Op, f string) *match {
 	return m
 }
 
-// load loads the Gawp config file and handles the loading of rules
-func load(dir, f string) error {
+// load loads the Gawp config file and handles the loading of rules.
+// Returns start and stop commands along with any error.
+func load(dir, f string) ([]string, []string, error) {
 	// Init/reset config, rules and matches cache
 	config = &configuration{recursive: true}
 	matches = map[uint64]*match{}
@@ -358,7 +388,7 @@ func load(dir, f string) error {
 	h, err := os.Open(dir + "/" + f)
 
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 
 	defer h.Close()
@@ -366,18 +396,31 @@ func load(dir, f string) error {
 	b, err := ioutil.ReadAll(h)
 
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 
-	var c map[string]interface{}
+	var (
+		start, stop []string
+		c           map[string]interface{}
+	)
 
 	if err = yaml.Unmarshal(b, &c); err != nil {
-		return err
+		return nil, nil, err
 	}
 
 	for k, v := range c {
 		// Conversions not tested for success; keep type defaults
 		switch strings.ToLower(k) {
+		case "start":
+			if start, err = parseCmds(v); err != nil {
+				return nil, nil, err
+			}
+
+		case "stop":
+			if stop, err = parseCmds(v); err != nil {
+				return nil, nil, err
+			}
+
 		case "recursive":
 			config.recursive, _ = v.(bool)
 
@@ -397,7 +440,7 @@ func load(dir, f string) error {
 
 		default:
 			if err = parseRules(k, v); err != nil {
-				return err
+				return nil, nil, err
 			}
 		}
 	}
@@ -427,14 +470,32 @@ func load(dir, f string) error {
 	runtime.GOMAXPROCS(config.workers)
 
 	if err = setLogFile(dir, config.logFile); err != nil {
-		return err
+		return nil, nil, err
 	}
 
-	return nil
+	return start, stop, nil
+}
+
+func parseCmds(i interface{}) ([]string, error) {
+	c, ok := i.([]interface{})
+
+	if !ok {
+		return nil, errInvalidCmd
+	}
+
+	var cmds []string
+
+	for _, v := range c {
+		if c, ok := v.(string); ok && c != "" {
+			cmds = append(cmds, c)
+		}
+	}
+
+	return cmds, nil
 }
 
 // parseRules builds the rules map, adding rules into
-// its defined event "bucket"
+// its defined event "bucket".
 func parseRules(s string, i interface{}) error {
 	e := parseEvents(s)
 
@@ -494,7 +555,7 @@ func parseRules(s string, i interface{}) error {
 }
 
 // parseEvents returns the fsnotify.Op values
-// for the events in the string
+// for the events in the string.
 func parseEvents(s string) (e []fsnotify.Op) {
 	for _, v := range strings.Split(s, ",") {
 		switch strings.ToLower(strings.TrimSpace(v)) {
@@ -514,7 +575,7 @@ func parseEvents(s string) (e []fsnotify.Op) {
 	return
 }
 
-// setLogFile sets the logger output destination
+// setLogFile sets the logger output destination.
 func setLogFile(dir, f string) error {
 	if f == "" {
 		log.SetOutput(os.Stdout)
@@ -541,14 +602,14 @@ func setLogFile(dir, f string) error {
 	return nil
 }
 
-// lockDir creates a lock file for the active directory
+// lockDir creates a lock file for the active directory.
 func lockDir(dir string) (*os.File, error) {
 	f := os.TempDir() + "/gawp-" + strconv.FormatUint(hash64(0, dir), 36) + ".lock"
 
 	return os.OpenFile(f, os.O_CREATE|os.O_EXCL, os.ModeExclusive)
 }
 
-// hash64 returns the hash of the given FS operation & string as uint64
+// hash64 returns the hash of the given FS operation & string as uint64.
 func hash64(e fsnotify.Op, s string) uint64 {
 	hasher64Mu.Lock()
 
