@@ -93,6 +93,10 @@ func main() {
 	}
 
 	defer func() {
+		if err := lock.Close(); err != nil {
+			log.Println(err)
+		}
+
 		if err := os.Remove(lock.Name()); err != nil {
 			log.Println(err)
 		}
