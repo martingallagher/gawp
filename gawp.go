@@ -55,6 +55,7 @@ var (
 	hasher64      = fnv.New64a()
 	hasher64Mu    = &sync.Mutex{}
 	errInvalidCmd = errors.New("invalid command")
+	rootDir       string
 )
 
 // Gawp configuration.
@@ -131,6 +132,8 @@ func main() {
 	}
 
 	defer watcher.Close()
+
+	rootDir = dir
 
 	if config.recursive {
 		// Watch root and child directories
@@ -371,6 +374,7 @@ func findMatch(e fsnotify.Op, f string) *match {
 				cmd = strings.Replace(cmd, "$"+strconv.Itoa(i), s[0][i], -1)
 			}
 
+			cmd = strings.Replace(cmd, "$dir", rootDir, -1)
 			m.cmds = append(m.cmds, strings.Replace(cmd, "$file", f, -1))
 		}
 
