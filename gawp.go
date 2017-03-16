@@ -55,7 +55,6 @@ var (
 	hasher64      = fnv.New64a()
 	hasher64Mu    = &sync.Mutex{}
 	errInvalidCmd = errors.New("invalid command")
-	rootDir       string
 )
 
 // Gawp configuration.
@@ -132,8 +131,6 @@ func main() {
 	}
 
 	defer watcher.Close()
-
-	rootDir = dir
 
 	if config.recursive {
 		// Watch root and child directories
@@ -217,7 +214,7 @@ func main() {
 
 			wg.Add(1)
 
-			go worker(throttle, wg, event.Op, filename)
+			go worker(throttle, wg, event)
 
 		case err = <-watcher.Errors:
 			log.Println("fsnotify error:", err)
@@ -246,14 +243,16 @@ func isAtomicOp(e fsnotify.Op, f string) bool {
 	return false
 }
 
-func worker(throttle chan struct{}, wg *sync.WaitGroup, e fsnotify.Op, f string) {
+func worker(throttle chan struct{}, wg *sync.WaitGroup, event fsnotify.Event) {
 	defer func() {
 		<-throttle
 
 		wg.Done()
 	}()
 
-	m := findMatch(e, f)
+	f := filepath.Base(event.Name)
+	dir := filepath.Dir(event.Name)
+	m := findMatch(event.Op, f, dir)
 
 	if m == nil {
 		return
@@ -323,7 +322,7 @@ func handleEvent(e fsnotify.Event) error {
 
 // findMatch attempts to find a rule match for file path
 // On success caches the match for fast future lookups.
-func findMatch(e fsnotify.Op, f string) *match {
+func findMatch(e fsnotify.Op, f string, dir string) *match {
 	matchesMu.Lock()
 
 	defer matchesMu.Unlock()
@@ -374,7 +373,7 @@ func findMatch(e fsnotify.Op, f string) *match {
 				cmd = strings.Replace(cmd, "$"+strconv.Itoa(i), s[0][i], -1)
 			}
 
-			cmd = strings.Replace(cmd, "$dir", rootDir, -1)
+			cmd = strings.Replace(cmd, "$dir", dir, -1)
 			m.cmds = append(m.cmds, strings.Replace(cmd, "$file", f, -1))
 		}
 
