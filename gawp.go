@@ -155,7 +155,7 @@ func main() {
 		return
 	}
 
-	log.Println("started Gawp")
+	log.Println("Started Gawp")
 
 	// Disable file system notifications for the log file
 	if config.logFile != "" {
@@ -195,7 +195,7 @@ func main() {
 			if filename == *configFile {
 				// Wait for active workers
 				wg.Wait()
-				log.Println("reloading config file")
+				log.Println("Reloading config file")
 
 				l, w := config.logFile, config.workers
 
