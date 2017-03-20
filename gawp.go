@@ -83,27 +83,32 @@ func main() {
 	dir, err := os.Getwd()
 
 	if err != nil {
-		log.Fatal(err)
+		log.Println("Failed to get working directory:", err)
+
+		return
 	}
 
 	lock, err := lockDir(dir)
 
 	if err != nil {
-		log.Fatalf("unable to lock active directory: %s", err)
+		log.Printf("Unable to lock active directory: %s", err)
+
+		return
 	}
 
 	defer func() {
-		if err := lock.Close(); err != nil {
+		if err = lock.Close(); err != nil {
 			log.Println(err)
 		}
 
-		if err := os.Remove(lock.Name()); err != nil {
+		if err = os.Remove(lock.Name()); err != nil {
 			log.Println(err)
 		}
 
+		// Release logfile handle
 		if logFile == nil {
 			return
-		} else if err := logFile.Close(); err != nil {
+		} else if err = logFile.Close(); err != nil {
 			log.Println(err)
 		}
 	}()
@@ -111,7 +116,9 @@ func main() {
 	start, stop, err := load(dir, *configFile)
 
 	if err != nil {
-		log.Fatalf("unable to load configuration file: %s (%s)", *configFile, err)
+		log.Printf("Unable to load configuration file: %s (%s)", *configFile, err)
+
+		return
 	}
 
 	// Run any start-up commands
@@ -127,7 +134,9 @@ func main() {
 
 	// File system notifications
 	if watcher, err = fsnotify.NewWatcher(); err != nil {
-		log.Fatal(err)
+		log.Println("Unable to initialize a new FS watcher:", err)
+
+		return
 	}
 
 	defer watcher.Close()
@@ -135,14 +144,18 @@ func main() {
 	if config.recursive {
 		// Watch root and child directories
 		if err = filepath.Walk(dir, walk); err != nil {
-			log.Fatal(err)
+			log.Printf("Unable to recursively walk directory (%s): %s", dir, err)
+
+			return
 		}
 	} else if err = watcher.Add(dir); err != nil {
 		//  Only watch the root dir
-		log.Fatal(err)
+		log.Printf("Unable to recursively walk directory (%s): %s", dir, err)
+
+		return
 	}
 
-	log.Println("started Gawp")
+	log.Println("Started Gawp")
 
 	// Disable file system notifications for the log file
 	if config.logFile != "" {
@@ -182,12 +195,14 @@ func main() {
 			if filename == *configFile {
 				// Wait for active workers
 				wg.Wait()
-				log.Println("reloading config file")
+				log.Println("Reloading config file")
 
 				l, w := config.logFile, config.workers
 
 				if _, stop, err = load(dir, filename); err != nil {
-					log.Fatal(err)
+					log.Println("Unable to reload config file:", err)
+
+					return
 				}
 
 				if config.logFile != "" && config.logFile != l {
@@ -259,9 +274,9 @@ func worker(throttle chan struct{}, wg *sync.WaitGroup, event fsnotify.Event) {
 	}
 
 	// Atomicity for the given match
-	(*m).mu.Lock()
+	m.mu.Lock()
 
-	defer (*m).mu.Unlock()
+	defer m.mu.Unlock()
 
 	run(m.cmds, false)
 }
