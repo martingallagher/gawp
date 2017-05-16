@@ -21,12 +21,12 @@ The configuration file location can be set using the `-config my.conf` command-l
 recursive: true           # Watch directories recursively, default: true
 verbose: false            # Verbose logging, default: false
 workers: 4                # Number of concurrent workers (high numbers can thrash IO), default: number CPUs / 2 (minimum 1)
-#logfile: gawp.log        # Gawp logfile, default: stdout
+# logfile: gawp.log        # Gawp logfile, default: stdout
 
-#start:
+# start:
 #  - start myscript
 
-#stop:
+# stop:
 #  - echo STOPPING!
 
 write, create, rename:    # Actionable events (supported: create, write, rename, remove, chmod), executed sequentially
