@@ -87,5 +87,4 @@ If there's output from `jshint`, a notification bubble will be displayed to the 
 # Contributions
 Bug fixes and feature requests welcome.
 
-# Contributors
-- [Martin Gallagher](http://martingallagher.com/)
+# [Contributors](https://github.com/martingallagher/gawp/graphs/contributors)
